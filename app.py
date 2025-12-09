@@ -50,9 +50,7 @@ st.markdown("""
 
 # --- APIキー取得関数 ---
 def get_api_key():
-    # 1. 環境変数
     key = os.environ.get("GOOGLE_API_KEY")
-    # 2. Streamlit Secrets
     if not key:
         try:
             key = st.secrets["GOOGLE_API_KEY"]
@@ -60,7 +58,7 @@ def get_api_key():
             pass
     return key
 
-# --- 画像生成関数（エラーハンドリング強化版） ---
+# --- 画像生成関数（修正版） ---
 def generate_single_image(client, prompt, character_parts, pose_bytes, model_name):
     """
     画像を生成する関数。
@@ -73,14 +71,16 @@ def generate_single_image(client, prompt, character_parts, pose_bytes, model_nam
             contents=[
                 types.Content(
                     parts=[
-                        types.Part.from_text(prompt),
+                        # 【修正箇所】text= を明記しました
+                        types.Part.from_text(text=prompt),
                         *character_parts,
+                        # 【修正箇所】data=, mime_type= を明記しました
                         types.Part.from_bytes(data=pose_bytes, mime_type="image/png")
                     ]
                 )
             ],
             config=types.GenerateContentConfig(
-                response_mime_type="image/png", # 画像出力を要求
+                response_mime_type="image/png", 
             )
         )
         
@@ -98,7 +98,6 @@ def generate_single_image(client, prompt, character_parts, pose_bytes, model_nam
         return "⚠️ エラー: レスポンスにデータが含まれていません。"
 
     except Exception as e:
-        # システムエラー（APIキー間違い、モデル名間違い、通信エラーなど）
         return f"🚫 システムエラー: {str(e)}"
 
 def main():
@@ -143,15 +142,15 @@ def main():
         st.subheader("3. 詳細設定")
         custom_prompt = st.text_area("追加プロンプト", placeholder="例：少年漫画風、ドラマチックな影、高画質...", height=80)
         
-        num_images = st.slider("生成枚数", 1, 10, 2) # デフォルト2枚
+        num_images = st.slider("生成枚数", 1, 10, 2) 
         
-        # モデル選択（重要：動かない場合はここを変更する）
+        # モデル選択
         model_name = st.selectbox(
             "使用モデル", 
             [
-                "gemini-2.0-flash-exp",   # 最新の実験版（推奨）
-                "gemini-1.5-pro",         # 安定版（画像生成できない場合あり）
-                "imagen-3.0-generate-001" # 画像生成専用（権限が必要）
+                "gemini-2.0-flash-exp",   
+                "gemini-1.5-pro",         
+                "imagen-3.0-generate-001" 
             ], 
             index=0,
             help="エラーが出る場合はモデルを変更してみてください。"
@@ -164,7 +163,6 @@ def main():
     st.markdown('<h1 class="main-header">🎨 MangaMaker AI</h1>', unsafe_allow_html=True)
     st.markdown("キャラクター画像とポーズ画像を組み合わせて、漫画のコマを生成します。")
 
-    # セッション状態の初期化
     if 'generated_images' not in st.session_state:
         st.session_state.generated_images = []
 
@@ -182,10 +180,13 @@ def main():
             # データ変換
             character_parts = []
             for cf in char_files:
+                # 【修正箇所】ここも text= や data= などを明記するのが安全
+                # 画像の場合は from_bytes(data=..., mime_type=...) なのでOK
                 character_parts.append(types.Part.from_bytes(data=cf.getvalue(), mime_type=cf.type))
+            
             pose_bytes = pose_file.getvalue()
 
-            # プロンプト作成
+            # プロンプト
             prompt_text = f"""
             You are a professional manga artist. Generate an image based on inputs.
             
@@ -198,14 +199,14 @@ def main():
             - {custom_prompt if custom_prompt else "Standard Japanese manga style, clean lines."}
             """
 
-            status_text.info(f"🎨 生成中... (モデル: {model_name}, 枚数: {num_images}枚)")
+            status_text.info(f"🎨 生成中... (モデル: {model_name})")
             
             results = []
-            
-            # 並列処理
             workers = min(num_images, 4)
+            
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = [
+                    # 引数名は修正済みの関数へ
                     executor.submit(generate_single_image, client, prompt_text, character_parts, pose_bytes, model_name) 
                     for _ in range(num_images)
                 ]
@@ -213,22 +214,18 @@ def main():
                 for i, future in enumerate(concurrent.futures.as_completed(futures)):
                     result = future.result()
                     
-                    # 結果の判定 logic
                     if isinstance(result, bytes):
-                        # 画像データ(成功)
                         results.append(result)
                     elif isinstance(result, str):
-                        # エラーメッセージ(失敗) - 画面に赤字で表示
                         st.error(result)
                     
                     progress_bar.progress((i + 1) / num_images)
 
-            # 結果保存
             if results:
                 st.session_state.generated_images = results
                 status_text.success(f"✅ 完了: {len(results)}枚の画像を生成しました！")
             else:
-                status_text.error("❌ 画像が1枚も生成されませんでした。上のエラーメッセージを確認してください。")
+                status_text.error("❌ 画像生成エラー。上のメッセージを確認してください。")
             
             progress_bar.empty()
 
@@ -251,8 +248,6 @@ def main():
                     key=f"dl_{idx}",
                     use_container_width=True
                 )
-    else:
-        st.caption("ここに生成結果が表示されます。")
 
 if __name__ == "__main__":
     main()
